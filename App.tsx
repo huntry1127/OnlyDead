@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -21,10 +21,16 @@ type Show = {
   venue?: string;
   coverage?: string;
   creator?: string;
+  source?: string;
+  avg_rating?: number | string;
+  num_reviews?: number | string;
 };
 type ArchiveFile = { name: string; format?: string; size?: string };
+type PlaybackBookmark = { show: Show; trackName: string; trackIndex: number; position: number };
+type SourceFilter = 'all' | 'soundboard' | 'audience' | 'matrix';
 const ARCHIVE = 'https://archive.org';
 const FAVORITES_KEY = 'dead-radio:favorites:v1';
+const PLAYBACK_KEY = 'dead-radio:playback:v1';
 const COLORS = {
   bg: '#101713', panel: '#19231D', panel2: '#202C24', line: '#334138',
   text: '#F4F0E7', muted: '#A8B1A9', green: '#B8D68C', gold: '#E9BD69',
@@ -43,7 +49,7 @@ function searchUrl(term: string) {
   }
   const params = new URLSearchParams();
   params.set('q', q);
-  ['identifier', 'title', 'date', 'year', 'venue', 'coverage', 'creator'].forEach((field) => params.append('fl[]', field));
+  ['identifier', 'title', 'date', 'year', 'venue', 'coverage', 'creator', 'source', 'avg_rating'].forEach((field) => params.append('fl[]', field));
   params.set('sort[]', 'date desc');
   params.set('rows', '30');
   params.set('page', '1');
@@ -56,6 +62,20 @@ function showYear(show?: Show) {
 function showLocation(show?: Show) {
   return show?.venue || show?.coverage || show?.creator || 'Live concert recording';
 }
+function sourceKind(show?: Show): Exclude<SourceFilter, 'all'> | 'other' {
+  const source = `${show?.source || ''} ${show?.title || ''}`.toLowerCase();
+  if (/\b(matrix|mtx)\b/.test(source)) return 'matrix';
+  if (/\b(sbd|soundboard|board)\b/.test(source)) return 'soundboard';
+  if (/\b(aud|audience)\b/.test(source)) return 'audience';
+  return 'other';
+}
+function sourceLabel(show?: Show) {
+  const kind = sourceKind(show);
+  if (kind === 'soundboard') return 'SOUNDBOARD';
+  if (kind === 'audience') return 'AUDIENCE';
+  if (kind === 'matrix') return 'MATRIX';
+  return 'SOURCE UNLISTED';
+}
 function readableTrack(name: string) {
   return name.replace(/\.(mp3|ogg|m4a)$/i, '').replace(/[_-]+/g, ' ').trim();
 }
@@ -64,11 +84,12 @@ function streamUrl(identifier: string, filename: string) {
 }
 
 export default function App() {
-  const player = useAudioPlayer(null, { downloadFirst: false });
+  const player = useAudioPlayer(null, { downloadFirst: false, updateInterval: 1000 });
   const playback = useAudioPlayerStatus(player);
   const [shows, setShows] = useState<Show[]>([]);
   const [foundCount, setFoundCount] = useState(0);
   const [favorites, setFavorites] = useState<Show[]>([]);
+  const [lastListen, setLastListen] = useState<PlaybackBookmark | null>(null);
   const [query, setQuery] = useState('');
   const [activeQuery, setActiveQuery] = useState('');
   const [busy, setBusy] = useState(false);
@@ -77,11 +98,19 @@ export default function App() {
   const [tracks, setTracks] = useState<ArchiveFile[]>([]);
   const [trackIndex, setTrackIndex] = useState(0);
   const [tab, setTab] = useState<'shows' | 'favorites'>('shows');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [restoring, setRestoring] = useState(false);
+  const [playbackError, setPlaybackError] = useState('');
+  const pendingSeekRef = useRef<{ seconds: number; shouldPlay: boolean } | null>(null);
+  const lastSaveAtRef = useRef(0);
+  const finishHandledRef = useRef(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(FAVORITES_KEY).then((value) => {
-      if (value) setFavorites(JSON.parse(value));
-    }).catch(() => undefined);
+    Promise.all([AsyncStorage.getItem(FAVORITES_KEY), AsyncStorage.getItem(PLAYBACK_KEY)])
+      .then(([savedFavorites, savedPlayback]) => {
+        if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
+        if (savedPlayback) setLastListen(JSON.parse(savedPlayback));
+      }).catch(() => undefined);
     setAudioModeAsync({
       playsInSilentMode: true,
       shouldPlayInBackground: true,
@@ -107,11 +136,42 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => { fetchShows(); }, [fetchShows]);
+  useEffect(() => {
+    const timer = setTimeout(() => { void fetchShows(); }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchShows]);
 
   const visibleShows = useMemo(() => tab === 'favorites'
     ? favorites
-    : shows, [favorites, shows, tab]);
+    : shows, [favorites, shows, tab]).filter((show) => sourceFilter === 'all' || sourceKind(show) === sourceFilter);
+
+  const saveBookmark = useCallback(async (bookmark: PlaybackBookmark) => {
+    setLastListen(bookmark);
+    try { await AsyncStorage.setItem(PLAYBACK_KEY, JSON.stringify(bookmark)); } catch { /* resume is best effort */ }
+  }, []);
+
+  useEffect(() => {
+    const currentTrack = tracks[trackIndex];
+    if (!selectedShow || !currentTrack || !playback.isLoaded) return;
+    const now = Date.now();
+    if (now - lastSaveAtRef.current < 5000 && playback.playing) return;
+    lastSaveAtRef.current = now;
+    void saveBookmark({
+      show: selectedShow,
+      trackName: currentTrack.name,
+      trackIndex,
+      position: Math.max(0, playback.currentTime || 0),
+    });
+  }, [playback.currentTime, playback.isLoaded, playback.playing, saveBookmark, selectedShow, trackIndex, tracks]);
+
+  useEffect(() => {
+    const pendingSeek = pendingSeekRef.current;
+    if (!pendingSeek || !playback.isLoaded) return;
+    pendingSeekRef.current = null;
+    player.seekTo(pendingSeek.seconds).then(() => {
+      if (pendingSeek.shouldPlay) player.play();
+    }).catch(() => setPlaybackError('Could not restore this stream position. Tap retry to start this track again.'));
+  }, [playback.isLoaded, player]);
 
   const toggleFavorite = useCallback(async (show: Show) => {
     const next = favorites.some((item) => item.identifier === show.identifier)
@@ -123,6 +183,8 @@ export default function App() {
 
   const startTrack = useCallback(async (index: number, list = tracks, show = selectedShow) => {
     if (!show || !list[index]) return;
+    pendingSeekRef.current = null;
+    setPlaybackError('');
     setTrackIndex(index);
     const track = list[index];
     player.replace({ uri: streamUrl(show.identifier, track.name) });
@@ -130,11 +192,15 @@ export default function App() {
       title: readableTrack(track.name),
       artist: 'Grateful Dead',
       albumTitle: show.title || `${showYear(show)} concert`,
+    }, {
+      showSeekBackward: true,
+      showSeekForward: true,
     });
     player.play();
-  }, [player, selectedShow, tracks]);
+    void saveBookmark({ show, trackName: track.name, trackIndex: index, position: 0 });
+  }, [player, saveBookmark, selectedShow, tracks]);
 
-  const selectShow = useCallback(async (show: Show) => {
+  const selectShow = useCallback(async (show: Show, resume?: PlaybackBookmark) => {
     player.pause();
     player.setActiveForLockScreen(false);
     setSelectedShow(show);
@@ -150,12 +216,35 @@ export default function App() {
         .filter((file: ArchiveFile) => !/(spectrogram|_thumb|_meta|_files|ffp|md5|checksum)/i.test(file.name || ''))
         .sort((a: ArchiveFile, b: ArchiveFile) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
       if (!files.length) throw new Error('No browser-playable audio stream is listed for this show.');
+      const matchingTrack = resume ? files.findIndex((file) => file.name === resume.trackName) : -1;
+      const selectedIndex = matchingTrack >= 0 ? matchingTrack : Math.min(resume?.trackIndex || 0, files.length - 1);
       setTracks(files);
-      await startTrack(0, files, show);
+      if (resume) {
+        setTrackIndex(selectedIndex);
+        setPlaybackError('');
+        const track = files[selectedIndex];
+        player.replace({ uri: streamUrl(show.identifier, track.name) });
+        player.setActiveForLockScreen(true, {
+          title: readableTrack(track.name),
+          artist: 'Grateful Dead',
+          albumTitle: show.title || `${showYear(show)} concert`,
+        }, { showSeekBackward: true, showSeekForward: true });
+        pendingSeekRef.current = { seconds: Math.max(0, resume.position), shouldPlay: true };
+        void saveBookmark({ show, trackName: track.name, trackIndex: selectedIndex, position: resume.position });
+      } else {
+        await startTrack(0, files, show);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load this show.');
     }
-  }, [player, startTrack]);
+  }, [player, saveBookmark, startTrack]);
+
+  const resumeLastListen = useCallback(async () => {
+    if (!lastListen) return;
+    setRestoring(true);
+    await selectShow(lastListen.show, lastListen);
+    setRestoring(false);
+  }, [lastListen, selectShow]);
 
   const nextTrack = useCallback(() => {
     if (trackIndex + 1 < tracks.length) startTrack(trackIndex + 1);
@@ -164,8 +253,30 @@ export default function App() {
     if (trackIndex > 0) startTrack(trackIndex - 1);
   }, [startTrack, trackIndex]);
 
+  const retryCurrentTrack = useCallback(() => {
+    const track = tracks[trackIndex];
+    if (!selectedShow || !track) return;
+    setPlaybackError('');
+    pendingSeekRef.current = { seconds: Math.max(0, playback.currentTime || 0), shouldPlay: true };
+    player.pause();
+    player.replace({ uri: streamUrl(selectedShow.identifier, track.name) });
+    player.setActiveForLockScreen(true, {
+      title: readableTrack(track.name),
+      artist: 'Grateful Dead',
+      albumTitle: selectedShow.title || `${showYear(selectedShow)} concert`,
+    }, { showSeekBackward: true, showSeekForward: true });
+  }, [playback.currentTime, player, selectedShow, trackIndex, tracks]);
+
   useEffect(() => {
-    if (playback.didJustFinish && trackIndex + 1 < tracks.length) nextTrack();
+    if (playback.didJustFinish && !finishHandledRef.current) {
+      finishHandledRef.current = true;
+      if (trackIndex + 1 < tracks.length) {
+        const timer = setTimeout(() => nextTrack(), 0);
+        return () => clearTimeout(timer);
+      }
+    } else if (!playback.didJustFinish) {
+      finishHandledRef.current = false;
+    }
   }, [nextTrack, playback.didJustFinish, trackIndex, tracks.length]);
 
   const surpriseMe = useCallback(() => {
@@ -186,6 +297,10 @@ export default function App() {
         </View>
         <Text style={styles.showTitle} numberOfLines={2}>{item.title || item.identifier}</Text>
         <Text style={styles.location} numberOfLines={1}>{showLocation(item)}</Text>
+        <View style={styles.metadataRow}>
+          <Text style={styles.sourcePill}>{sourceLabel(item)}</Text>
+          {Number(item.avg_rating) > 0 ? <Text style={styles.rating}>★ {Number(item.avg_rating).toFixed(1)} Archive rating</Text> : null}
+        </View>
         <View style={styles.cardFooter}>
           <Text style={styles.identifier} numberOfLines={1}>{item.identifier}</Text>
           <Pressable style={styles.playButton} onPress={() => selectShow(item)} accessibilityRole="button">
@@ -198,6 +313,7 @@ export default function App() {
 
   const duration = playback.duration || 0;
   const progress = duration ? Math.min(1, playback.currentTime / duration) : 0;
+  const visiblePlaybackError = playback.error ? 'This stream was interrupted. Retry the track to reconnect.' : playbackError;
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
   return (
@@ -217,6 +333,17 @@ export default function App() {
           <Text style={styles.eyebrow}>THE INTERNET ARCHIVE  ·  GRATEFUL DEAD COLLECTION</Text>
           <Text style={styles.hero}>Every show has{ '\n' }its own weather.</Text>
           <Text style={styles.intro}>Browse by year, date, or venue. Choose a show and listen here; recordings stream from Archive.org.</Text>
+
+          {lastListen && !selectedShow ? (
+            <Pressable style={styles.resumeCard} onPress={resumeLastListen} disabled={restoring} accessibilityRole="button">
+              <View style={styles.resumeCopy}>
+                <Text style={styles.resumeEyebrow}>{restoring ? 'RECONNECTING TO YOUR SHOW' : 'PICK UP WHERE YOU LEFT OFF'}</Text>
+                <Text style={styles.resumeTitle} numberOfLines={1}>{lastListen.show.title || lastListen.show.identifier}</Text>
+                <Text style={styles.resumeSub}>{showYear(lastListen.show)}  ·  {readableTrack(lastListen.trackName)}  ·  {formatTime(lastListen.position)}</Text>
+              </View>
+              {restoring ? <ActivityIndicator color={COLORS.green} /> : <Text style={styles.resumeAction}>RESUME ↗</Text>}
+            </Pressable>
+          ) : null}
 
           <View style={styles.searchRow}>
             <TextInput
@@ -242,9 +369,20 @@ export default function App() {
             <Pressable onPress={surpriseMe} style={styles.surpriseButton}><Text style={styles.surpriseText}>SURPRISE ME ↗</Text></Pressable>
           </View>
 
+          <View style={styles.sourceFilters}>
+            {([
+              ['all', 'ALL SOURCES'], ['soundboard', 'SOUNDBOARD'], ['audience', 'AUDIENCE'], ['matrix', 'MATRIX'],
+            ] as [SourceFilter, string][]).map(([value, label]) => (
+              <Pressable key={value} onPress={() => setSourceFilter(value)} style={[styles.sourceFilter, sourceFilter === value && styles.sourceFilterActive]}>
+                <Text style={[styles.sourceFilterText, sourceFilter === value && styles.sourceFilterTextActive]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {sourceFilter !== 'all' ? <Text style={styles.filterNote}>Source filters apply to the shows currently loaded.</Text> : null}
+
           <View style={styles.listHeadingRow}>
             <Text style={styles.listHeading}>{tab === 'favorites' ? 'Saved shows' : activeQuery ? `Search results` : 'Browse the archive'}</Text>
-            <Text style={styles.resultCount}>{busy ? 'Searching…' : tab === 'favorites' ? `${visibleShows.length} saved` : `${foundCount.toLocaleString()} recordings`}</Text>
+            <Text style={styles.resultCount}>{busy ? 'Searching…' : tab === 'favorites' ? `${visibleShows.length} saved` : sourceFilter === 'all' ? `${foundCount.toLocaleString()} recordings` : `${visibleShows.length} loaded`}</Text>
           </View>
           {activeQuery ? <Text style={styles.queryLine}>Showing matches for “{activeQuery}”</Text> : null}
           {error ? (
@@ -298,6 +436,14 @@ export default function App() {
             <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${progress * 100}%` }]} /></View>
             <Text style={styles.timeText}>{formatTime(duration)}</Text>
           </View>
+          {visiblePlaybackError ? (
+            <View style={styles.playbackErrorRow}>
+              <Text style={styles.playbackErrorText} numberOfLines={2}>{visiblePlaybackError}</Text>
+              <Pressable onPress={retryCurrentTrack} style={styles.retryTrackButton}>
+                <Text style={styles.retryTrackText}>RETRY</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
       </View>
     </SafeAreaView>
@@ -320,6 +466,12 @@ const styles = StyleSheet.create({
   eyebrow: { color: COLORS.green, fontSize: 9, letterSpacing: 1.5, fontWeight: '700' },
   hero: { color: COLORS.text, fontFamily: 'Georgia', fontSize: 38, lineHeight: 41, marginTop: 12, letterSpacing: -1 },
   intro: { color: '#B9C1B8', fontSize: 13, lineHeight: 19, marginTop: 12, maxWidth: 460 },
+  resumeCard: { marginTop: 15, padding: 13, borderRadius: 10, borderWidth: 1, borderColor: '#647A54', backgroundColor: '#1C2A20', flexDirection: 'row', alignItems: 'center', gap: 10 },
+  resumeCopy: { flex: 1 },
+  resumeEyebrow: { color: COLORS.green, fontSize: 8, letterSpacing: 1, fontWeight: '800' },
+  resumeTitle: { color: COLORS.text, fontFamily: 'Georgia', fontSize: 16, marginTop: 5 },
+  resumeSub: { color: COLORS.muted, fontSize: 9, marginTop: 4 },
+  resumeAction: { color: COLORS.gold, fontSize: 9, fontWeight: '800', letterSpacing: 0.6 },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 19, padding: 7, backgroundColor: COLORS.panel, borderColor: COLORS.line, borderWidth: 1, borderRadius: 11 },
   searchInput: { flex: 1, paddingHorizontal: 10, paddingVertical: 8, color: COLORS.text, fontSize: 13 },
   searchButton: { paddingHorizontal: 13, paddingVertical: 11, borderRadius: 7, backgroundColor: COLORS.green },
@@ -332,6 +484,12 @@ const styles = StyleSheet.create({
   tabTextActive: { color: COLORS.text },
   surpriseButton: { borderWidth: 1, borderColor: COLORS.line, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 7 },
   surpriseText: { color: COLORS.gold, fontSize: 9, letterSpacing: 0.6, fontWeight: '700' },
+  sourceFilters: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 12 },
+  sourceFilter: { paddingHorizontal: 9, paddingVertical: 7, borderRadius: 15, borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.panel },
+  sourceFilterActive: { borderColor: COLORS.green, backgroundColor: '#253428' },
+  sourceFilterText: { color: COLORS.muted, fontSize: 8, letterSpacing: 0.5, fontWeight: '700' },
+  sourceFilterTextActive: { color: COLORS.green },
+  filterNote: { color: COLORS.muted, fontSize: 9, marginTop: 6 },
   listHeadingRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 17, marginBottom: 10 },
   listHeading: { color: COLORS.text, fontFamily: 'Georgia', fontSize: 20 },
   resultCount: { color: COLORS.muted, fontSize: 10 },
@@ -344,6 +502,9 @@ const styles = StyleSheet.create({
   favoriteActive: { color: COLORS.gold },
   showTitle: { color: COLORS.text, fontFamily: 'Georgia', fontSize: 18, lineHeight: 22, marginTop: 8 },
   location: { color: '#B4BEB5', fontSize: 11, marginTop: 5 },
+  metadataRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 9 },
+  sourcePill: { color: COLORS.green, borderWidth: 1, borderColor: '#50634A', paddingHorizontal: 7, paddingVertical: 4, borderRadius: 10, fontSize: 8, letterSpacing: 0.4, fontWeight: '700' },
+  rating: { color: COLORS.gold, fontSize: 9, fontWeight: '700' },
   cardFooter: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 10 },
   identifier: { flex: 1, color: '#87948A', fontSize: 8, fontFamily: 'monospace' },
   playButton: { backgroundColor: COLORS.green, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 7 },
@@ -377,4 +538,8 @@ const styles = StyleSheet.create({
   timeText: { width: 28, textAlign: 'center', color: COLORS.muted, fontSize: 8, fontVariant: ['tabular-nums'] },
   progressTrack: { height: 3, backgroundColor: '#36443A', flex: 1, borderRadius: 2, overflow: 'hidden' },
   progressFill: { height: 3, backgroundColor: COLORS.green },
+  playbackErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 },
+  playbackErrorText: { color: '#E5B88E', flex: 1, fontSize: 9 },
+  retryTrackButton: { borderWidth: 1, borderColor: '#765C3C', borderRadius: 6, paddingHorizontal: 9, paddingVertical: 6 },
+  retryTrackText: { color: COLORS.gold, fontSize: 8, fontWeight: '800', letterSpacing: 0.7 },
 });
