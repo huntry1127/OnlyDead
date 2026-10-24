@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 
@@ -25,6 +26,12 @@ type Show = {
   avg_rating?: number | string;
   num_reviews?: number | string;
 };
+type CuratedShow = {
+  date: string;
+  venue: string;
+  note?: string;
+};
+type FanPath = 'darkStar' | 'europe72' | 'may77' | 'laterYears';
 type ArchiveFile = { name: string; format?: string; size?: string };
 type PlaybackBookmark = { show: Show; trackName: string; trackIndex: number; position: number };
 type SourceFilter = 'all' | 'soundboard' | 'audience' | 'matrix';
@@ -34,6 +41,67 @@ const PLAYBACK_KEY = 'dead-radio:playback:v1';
 const COLORS = {
   bg: '#101713', panel: '#19231D', panel2: '#202C24', line: '#334138',
   text: '#F4F0E7', muted: '#A8B1A9', green: '#B8D68C', gold: '#E9BD69',
+};
+
+const ARCHIVE_POPULAR: (CuratedShow & { views: string; rank: number })[] = [
+  { date: '1977-05-08', venue: 'Barton Hall · Cornell University', views: '1.3M views', rank: 1 },
+  { date: '1973-06-10', venue: 'RFK Stadium · Washington, DC', views: '1.2M views', rank: 2 },
+  { date: '1973-02-15', venue: 'Dane County Coliseum · Madison, WI', views: '1.0M views', rank: 3 },
+  { date: '1987-04-03', venue: 'The Centrum · Worcester, MA', views: '782K views', rank: 4 },
+  { date: '1977-05-07', venue: 'Boston Garden · Boston, MA', views: '772K views', rank: 5 },
+  { date: '1977-02-26', venue: 'Swing Auditorium · San Bernardino, CA', views: '741K views', rank: 6 },
+  { date: '1977-05-09', venue: 'Memorial Auditorium · Buffalo, NY', views: '704K views', rank: 7 },
+  { date: '1971-08-06', venue: 'Hollywood Palladium · Los Angeles, CA', views: '555K views', rank: 8 },
+  { date: '1995-07-09', venue: 'Soldier Field · Chicago, IL', views: '551K views', rank: 9 },
+];
+
+const FAN_PATHS: Record<FanPath, { label: string; title: string; intro: string; shows: CuratedShow[] }> = {
+  darkStar: {
+    label: 'DARK STAR',
+    title: 'Dark Star journeys',
+    intro: 'Long-form improvisation and the shows fans point to when they ask for a great Dark Star.',
+    shows: [
+      { date: '1968-08-23', venue: 'Shrine Exhibition Hall · Los Angeles, CA', note: 'Primal Dead · Dark Star > St. Stephen > The Eleven' },
+      { date: '1969-02-28', venue: 'Fillmore West · San Francisco, CA', note: 'Dark Star > St. Stephen > The Eleven' },
+      { date: '1970-02-13', venue: 'Fillmore East · New York, NY', note: 'A frequently recommended, exploratory Dark Star' },
+      { date: '1972-04-08', venue: 'Wembley Empire Pool · London, England', note: 'Europe ’72 · Dark Star and classic song versions' },
+      { date: '1973-11-11', venue: 'Winterland Arena · San Francisco, CA', note: 'Three sets · the run’s only Dark Star' },
+      { date: '1974-09-10', venue: 'Alexandra Palace · London, England', note: 'A sprawling Dark Star > Morning Dew' },
+    ],
+  },
+  europe72: {
+    label: 'EUROPE ’72',
+    title: 'Europe ’72 favorites',
+    intro: 'A few fan-recommended stops from the tour, including two Dark Star picks.',
+    shows: [
+      { date: '1972-04-08', venue: 'Wembley Empire Pool · London, England', note: 'A fan-favorite Dark Star and classic set' },
+      { date: '1972-05-04', venue: 'L’Olympia · Paris, France', note: 'A long Dark Star > Sugar Magnolia sequence' },
+      { date: '1972-05-11', venue: 'Rotterdam Civic Hall · Rotterdam, Netherlands', note: 'A frequently recommended Europe ’72 night' },
+      { date: '1972-04-11', venue: 'Newcastle City Hall · Newcastle, England', note: 'Another recommended stop on the Europe ’72 tour' },
+    ],
+  },
+  may77: {
+    label: 'MAY ’77',
+    title: 'May ’77 run',
+    intro: 'The Archive’s most-viewed cluster and a Reddit favorite run, with very different set lists night to night.',
+    shows: [
+      { date: '1977-05-07', venue: 'Boston Garden · Boston, MA', note: 'A strong opening night in the run' },
+      { date: '1977-05-08', venue: 'Barton Hall · Cornell University', note: 'The famous Scarlet Begonias > Fire on the Mountain' },
+      { date: '1977-05-09', venue: 'Memorial Auditorium · Buffalo, NY', note: 'A fan favorite with a great Sugaree' },
+      { date: '1977-05-22', venue: 'Sportatorium · Pembroke Pines, FL', note: 'A Reddit favorite, especially the second-set closing stretch' },
+    ],
+  },
+  laterYears: {
+    label: 'LATER YEARS',
+    title: 'Later-year standouts',
+    intro: 'Picks from the discussion for listeners who want to move beyond the early ’70s and May ’77.',
+    shows: [
+      { date: '1976-07-18', venue: 'Orpheum Theatre · San Francisco, CA', note: 'A fan-described smooth, flowing show' },
+      { date: '1984-10-12', venue: 'Augusta Civic Center · Augusta, ME', note: 'Recommended in the debate over the Halloween ’84 pick' },
+      { date: '1984-10-15', venue: 'Hartford Civic Center · Hartford, CT', note: 'Another suggested show from the same ’84 run' },
+      { date: '1984-11-02', venue: 'Berkeley Community Theatre · Berkeley, CA', note: 'A commenter who attended preferred it to Halloween night' },
+    ],
+  },
 };
 
 function cleanTerm(value: string) {
@@ -49,7 +117,7 @@ function searchUrl(term: string) {
   }
   const params = new URLSearchParams();
   params.set('q', q);
-  ['identifier', 'title', 'date', 'year', 'venue', 'coverage', 'creator', 'source', 'avg_rating'].forEach((field) => params.append('fl[]', field));
+  ['identifier', 'title', 'date', 'year', 'venue', 'coverage', 'creator', 'source', 'avg_rating', 'num_reviews'].forEach((field) => params.append('fl[]', field));
   params.set('sort[]', 'date desc');
   params.set('rows', '30');
   params.set('page', '1');
@@ -83,7 +151,8 @@ function streamUrl(identifier: string, filename: string) {
   return `${ARCHIVE}/download/${encodeURIComponent(identifier)}/${filename.split('/').map(encodeURIComponent).join('/')}`;
 }
 
-export default function App() {
+function RadioApp() {
+  const insets = useSafeAreaInsets();
   const player = useAudioPlayer(null, { downloadFirst: false, updateInterval: 1000 });
   const playback = useAudioPlayerStatus(player);
   const [shows, setShows] = useState<Show[]>([]);
@@ -99,6 +168,7 @@ export default function App() {
   const [trackIndex, setTrackIndex] = useState(0);
   const [tab, setTab] = useState<'shows' | 'favorites'>('shows');
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [fanPath, setFanPath] = useState<FanPath>('darkStar');
   const [restoring, setRestoring] = useState(false);
   const [playbackError, setPlaybackError] = useState('');
   const pendingSeekRef = useRef<{ seconds: number; shouldPlay: boolean } | null>(null);
@@ -239,6 +309,34 @@ export default function App() {
     }
   }, [player, saveBookmark, startTrack]);
 
+  const openCuratedShow = useCallback(async (curated: CuratedShow) => {
+    setBusy(true);
+    setError('');
+    setTab('shows');
+    setSourceFilter('all');
+    setQuery(curated.date);
+    setActiveQuery(curated.date);
+    try {
+      const response = await fetch(searchUrl(curated.date));
+      if (!response.ok) throw new Error(`Archive search returned ${response.status}.`);
+      const json = await response.json();
+      const matches: Show[] = (json.response?.docs || []).filter((show: Show) => !!show.identifier);
+      if (!matches.length) throw new Error('No Archive recordings were found for that date.');
+      const ranked = [...matches].sort((a, b) => {
+        const ratingDifference = Number(b.avg_rating || 0) - Number(a.avg_rating || 0);
+        if (ratingDifference) return ratingDifference;
+        return Number(b.num_reviews || 0) - Number(a.num_reviews || 0);
+      });
+      setShows(ranked);
+      setFoundCount(Number(json.response?.numFound || ranked.length));
+      await selectShow(ranked[0]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not open that Archive show.');
+    } finally {
+      setBusy(false);
+    }
+  }, [selectShow]);
+
   const resumeLastListen = useCallback(async () => {
     if (!lastListen) return;
     setRestoring(true);
@@ -311,17 +409,34 @@ export default function App() {
     );
   };
 
+  const renderCuratedCard = (item: CuratedShow & { views?: string; rank?: number }) => (
+    <View key={`${item.date}-${item.venue}`} style={styles.curatedCard}>
+      <View style={styles.curatedCardTop}>
+        {typeof item.rank === 'number' ? <Text style={styles.curatedRank}>#{String(item.rank).padStart(2, '0')}</Text> : <View style={styles.curatedSpark}><Text style={styles.curatedSparkText}>✳</Text></View>}
+        {item.views ? <Text style={styles.curatedViews}>{item.views}</Text> : <Text style={styles.curatedPick}>FAN PICK</Text>}
+      </View>
+      <Text style={styles.curatedDate}>{item.date}</Text>
+      <Text style={styles.curatedVenue} numberOfLines={2}>{item.venue}</Text>
+      {item.note ? <Text style={styles.curatedNote} numberOfLines={2}>{item.note}</Text> : null}
+      <Pressable style={styles.curatedPlay} onPress={() => openCuratedShow(item)} accessibilityRole="button" accessibilityLabel={`Play show from ${item.date}`}>
+        <Text style={styles.curatedPlayText}>PLAY SHOW  ↗</Text>
+      </Pressable>
+    </View>
+  );
+
   const duration = playback.duration || 0;
   const progress = duration ? Math.min(1, playback.currentTime / duration) : 0;
   const visiblePlaybackError = playback.error ? 'This stream was interrupted. Retry the track to reconnect.' : playbackError;
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
       <View style={styles.container}>
         <View style={styles.header}>
-          <View style={styles.brandMark}><Text style={styles.brandMarkText}>✳</Text></View>
+          <View style={styles.brandMark}>
+            <Image source={require('./assets/icon.png')} style={styles.brandLogo} resizeMode="contain" accessibilityLabel="OnlyDead logo" />
+          </View>
           <View style={styles.brandCopy}>
             <Text style={styles.brand}>DEAD ARCHIVE RADIO</Text>
             <Text style={styles.brandSub}>A listener’s field guide</Text>
@@ -329,7 +444,7 @@ export default function App() {
           <View style={styles.streamBadge}><View style={styles.greenDot} /><Text style={styles.streamText}>ARCHIVE STREAM</Text></View>
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 250 + insets.bottom }]} keyboardShouldPersistTaps="handled">
           <Text style={styles.eyebrow}>THE INTERNET ARCHIVE  ·  GRATEFUL DEAD COLLECTION</Text>
           <Text style={styles.hero}>Every show has{ '\n' }its own weather.</Text>
           <Text style={styles.intro}>Browse by year, date, or venue. Choose a show and listen here; recordings stream from Archive.org.</Text>
@@ -380,6 +495,45 @@ export default function App() {
           </View>
           {sourceFilter !== 'all' ? <Text style={styles.filterNote}>Source filters apply to the shows currently loaded.</Text> : null}
 
+          {tab === 'shows' && !activeQuery && sourceFilter === 'all' ? (
+            <View style={styles.discovery}>
+              <View style={styles.discoveryHeading}>
+                <View style={styles.discoveryTitleGroup}>
+                  <Text style={styles.discoveryKicker}>THE ARCHIVE’S MOST-VIEWED RECORDINGS</Text>
+                  <Text style={styles.discoveryTitle}>Popular on the Archive</Text>
+                </View>
+                <Text style={styles.snapshot}>LATE 2024 SNAPSHOT</Text>
+              </View>
+              <Text style={styles.discoveryIntro}>Ranked by recording page views. Cornell appears twice in the Archive’s top ten as two separate recordings.</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.curatedRail}>
+                {ARCHIVE_POPULAR.map(renderCuratedCard)}
+              </ScrollView>
+
+              <View style={[styles.discoveryHeading, styles.fanHeading]}>
+                <View style={styles.discoveryTitleGroup}>
+                  <Text style={styles.discoveryKicker}>PICKS FROM DEADHEAD DISCUSSIONS</Text>
+                  <Text style={styles.discoveryTitle}>Fan recommended</Text>
+                </View>
+                <Text style={styles.snapshot}>NOT A RATING</Text>
+              </View>
+              <Text style={styles.discoveryIntro}>Explore by era or the kind of playing you want to hear.</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pathRail}>
+                {(Object.keys(FAN_PATHS) as FanPath[]).map((path) => (
+                  <Pressable key={path} onPress={() => setFanPath(path)} style={[styles.pathChip, fanPath === path && styles.pathChipActive]}>
+                    <Text style={[styles.pathChipText, fanPath === path && styles.pathChipTextActive]}>{FAN_PATHS[path].label}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <View style={styles.fanPathCopy}>
+                <Text style={styles.fanPathTitle}>{FAN_PATHS[fanPath].title}</Text>
+                <Text style={styles.fanPathIntro}>{FAN_PATHS[fanPath].intro}</Text>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.curatedRail}>
+                {FAN_PATHS[fanPath].shows.map(renderCuratedCard)}
+              </ScrollView>
+            </View>
+          ) : null}
+
           <View style={styles.listHeadingRow}>
             <Text style={styles.listHeading}>{tab === 'favorites' ? 'Saved shows' : activeQuery ? `Search results` : 'Browse the archive'}</Text>
             <Text style={styles.resultCount}>{busy ? 'Searching…' : tab === 'favorites' ? `${visibleShows.length} saved` : sourceFilter === 'all' ? `${foundCount.toLocaleString()} recordings` : `${visibleShows.length} loaded`}</Text>
@@ -418,7 +572,7 @@ export default function App() {
           <Text style={styles.disclaimer}>Independent fan listening interface. Recordings are served by the Internet Archive; availability and access are controlled by the Archive and collection policies. Not affiliated with or endorsed by the Grateful Dead or Internet Archive.</Text>
         </ScrollView>
 
-        <View style={styles.playerPanel}>
+        <View style={[styles.playerPanel, { paddingBottom: 12 + insets.bottom }]}>
           <View style={styles.playerTop}>
             <View style={styles.playerCopy}>
               <Text style={styles.nowPlayingLabel}>{selectedShow ? 'NOW PLAYING' : 'READY WHEN YOU ARE'}</Text>
@@ -450,12 +604,20 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <RadioApp />
+    </SafeAreaProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { height: 66, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  brandMark: { height: 39, width: 39, borderRadius: 22, borderWidth: 1, borderColor: '#758B6D', justifyContent: 'center', alignItems: 'center' },
-  brandMarkText: { color: COLORS.gold, fontSize: 21 },
+  header: { height: 70, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  brandMark: { height: 48, width: 48, borderRadius: 7, borderWidth: 1, borderColor: '#758B6D', backgroundColor: '#010001', overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
+  brandLogo: { height: 46, width: 46 },
   brandCopy: { marginLeft: 11 },
   brand: { color: COLORS.text, fontSize: 13, letterSpacing: 1.4, fontWeight: '700' },
   brandSub: { color: COLORS.muted, fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', marginTop: 3 },
@@ -490,6 +652,35 @@ const styles = StyleSheet.create({
   sourceFilterText: { color: COLORS.muted, fontSize: 8, letterSpacing: 0.5, fontWeight: '700' },
   sourceFilterTextActive: { color: COLORS.green },
   filterNote: { color: COLORS.muted, fontSize: 9, marginTop: 6 },
+  discovery: { marginTop: 24, marginHorizontal: -20, paddingLeft: 20, borderTopWidth: 1, borderTopColor: COLORS.line, paddingTop: 20 },
+  discoveryHeading: { paddingRight: 20, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 },
+  discoveryTitleGroup: { flex: 1 },
+  discoveryKicker: { color: COLORS.green, fontSize: 8, letterSpacing: 1.2, fontWeight: '800' },
+  discoveryTitle: { color: COLORS.text, fontFamily: 'Georgia', fontSize: 23, marginTop: 5 },
+  snapshot: { color: COLORS.muted, fontSize: 7, letterSpacing: 0.5, fontWeight: '700', paddingBottom: 3 },
+  discoveryIntro: { color: COLORS.muted, fontSize: 10, lineHeight: 15, marginTop: 7, marginBottom: 11, paddingRight: 25, maxWidth: 460 },
+  curatedRail: { gap: 9, paddingRight: 20, paddingBottom: 2 },
+  curatedCard: { width: 226, minHeight: 177, borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.panel, borderRadius: 10, padding: 12 },
+  curatedCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  curatedRank: { color: COLORS.gold, fontFamily: 'Georgia', fontSize: 16 },
+  curatedSpark: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#27362B', alignItems: 'center', justifyContent: 'center' },
+  curatedSparkText: { color: COLORS.green, fontSize: 13 },
+  curatedViews: { color: COLORS.gold, fontSize: 9, fontWeight: '700' },
+  curatedPick: { color: COLORS.green, fontSize: 8, letterSpacing: 0.8, fontWeight: '800' },
+  curatedDate: { color: COLORS.text, fontFamily: 'Georgia', fontSize: 17, marginTop: 12 },
+  curatedVenue: { color: '#C2CBC1', fontSize: 10, lineHeight: 14, marginTop: 4, minHeight: 28 },
+  curatedNote: { color: COLORS.muted, fontSize: 9, lineHeight: 13, marginTop: 7, minHeight: 26 },
+  curatedPlay: { alignSelf: 'flex-start', backgroundColor: '#B8D68C', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 6, marginTop: 'auto' },
+  curatedPlayText: { color: '#172019', fontSize: 8, letterSpacing: 0.5, fontWeight: '800' },
+  fanHeading: { marginTop: 24 },
+  pathRail: { gap: 7, paddingRight: 20, paddingBottom: 2 },
+  pathChip: { borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.panel, borderRadius: 15, paddingHorizontal: 10, paddingVertical: 7 },
+  pathChipActive: { borderColor: COLORS.green, backgroundColor: '#253428' },
+  pathChipText: { color: COLORS.muted, fontSize: 8, letterSpacing: 0.5, fontWeight: '700' },
+  pathChipTextActive: { color: COLORS.green },
+  fanPathCopy: { paddingRight: 20, marginTop: 11, marginBottom: 9 },
+  fanPathTitle: { color: COLORS.text, fontFamily: 'Georgia', fontSize: 16 },
+  fanPathIntro: { color: COLORS.muted, fontSize: 9, lineHeight: 14, marginTop: 4, maxWidth: 450 },
   listHeadingRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 17, marginBottom: 10 },
   listHeading: { color: COLORS.text, fontFamily: 'Georgia', fontSize: 20 },
   resultCount: { color: COLORS.muted, fontSize: 10 },
