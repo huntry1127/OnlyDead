@@ -430,12 +430,12 @@ function RadioApp() {
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
       <View style={styles.container}>
         <View style={styles.header}>
           <View style={styles.brandMark}>
-            <Image source={require('./assets/icon.png')} style={styles.brandLogo} resizeMode="contain" accessibilityLabel="OnlyDead logo" />
+            <Image source={require('./assets/onlydead-logo.png')} style={styles.brandLogo} resizeMode="contain" accessibilityLabel="OnlyDead logo" />
           </View>
           <View style={styles.brandCopy}>
             <Text style={styles.brand}>DEAD ARCHIVE RADIO</Text>
@@ -448,6 +448,44 @@ function RadioApp() {
           <Text style={styles.eyebrow}>THE INTERNET ARCHIVE  ·  GRATEFUL DEAD COLLECTION</Text>
           <Text style={styles.hero}>Every show has{ '\n' }its own weather.</Text>
           <Text style={styles.intro}>Browse by year, date, or venue. Choose a show and listen here; recordings stream from Archive.org.</Text>
+
+          {tab === 'shows' ? (
+            <View style={styles.discovery}>
+              <View style={styles.discoveryHeading}>
+                <View style={styles.discoveryTitleGroup}>
+                  <Text style={styles.discoveryKicker}>THE ARCHIVE’S MOST-VIEWED RECORDINGS</Text>
+                  <Text style={styles.discoveryTitle}>Popular on the Archive</Text>
+                </View>
+                <Text style={styles.snapshot}>LATE 2024 SNAPSHOT</Text>
+              </View>
+              <Text style={styles.discoveryIntro}>Top nine distinct show dates from the Archive’s late-2024 view snapshot. Cornell appears once, though the Archive counted two recordings of that show.</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.curatedRail}>
+                {ARCHIVE_POPULAR.map(renderCuratedCard)}
+              </ScrollView>
+              <View style={[styles.discoveryHeading, styles.fanHeading]}>
+                <View style={styles.discoveryTitleGroup}>
+                  <Text style={styles.discoveryKicker}>PICKS FROM DEADHEAD DISCUSSIONS</Text>
+                  <Text style={styles.discoveryTitle}>Fan recommended</Text>
+                </View>
+                <Text style={styles.snapshot}>NOT A RATING</Text>
+              </View>
+              <Text style={styles.discoveryIntro}>Explore by era or the kind of playing you want to hear.</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pathRail}>
+                {(Object.keys(FAN_PATHS) as FanPath[]).map((path) => (
+                  <Pressable key={path} onPress={() => setFanPath(path)} style={[styles.pathChip, fanPath === path && styles.pathChipActive]}>
+                    <Text style={[styles.pathChipText, fanPath === path && styles.pathChipTextActive]}>{FAN_PATHS[path].label}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <View style={styles.fanPathCopy}>
+                <Text style={styles.fanPathTitle}>{FAN_PATHS[fanPath].title}</Text>
+                <Text style={styles.fanPathIntro}>{FAN_PATHS[fanPath].intro}</Text>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.curatedRail}>
+                {FAN_PATHS[fanPath].shows.map(renderCuratedCard)}
+              </ScrollView>
+            </View>
+          ) : null}
 
           {lastListen && !selectedShow ? (
             <Pressable style={styles.resumeCard} onPress={resumeLastListen} disabled={restoring} accessibilityRole="button">
@@ -495,45 +533,6 @@ function RadioApp() {
           </View>
           {sourceFilter !== 'all' ? <Text style={styles.filterNote}>Source filters apply to the shows currently loaded.</Text> : null}
 
-          {tab === 'shows' && !activeQuery && sourceFilter === 'all' ? (
-            <View style={styles.discovery}>
-              <View style={styles.discoveryHeading}>
-                <View style={styles.discoveryTitleGroup}>
-                  <Text style={styles.discoveryKicker}>THE ARCHIVE’S MOST-VIEWED RECORDINGS</Text>
-                  <Text style={styles.discoveryTitle}>Popular on the Archive</Text>
-                </View>
-                <Text style={styles.snapshot}>LATE 2024 SNAPSHOT</Text>
-              </View>
-              <Text style={styles.discoveryIntro}>Top nine distinct show dates from the Archive’s late-2024 view snapshot. Cornell appears once, though the Archive counted two recordings of that show.</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.curatedRail}>
-                {ARCHIVE_POPULAR.map(renderCuratedCard)}
-              </ScrollView>
-
-              <View style={[styles.discoveryHeading, styles.fanHeading]}>
-                <View style={styles.discoveryTitleGroup}>
-                  <Text style={styles.discoveryKicker}>PICKS FROM DEADHEAD DISCUSSIONS</Text>
-                  <Text style={styles.discoveryTitle}>Fan recommended</Text>
-                </View>
-                <Text style={styles.snapshot}>NOT A RATING</Text>
-              </View>
-              <Text style={styles.discoveryIntro}>Explore by era or the kind of playing you want to hear.</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pathRail}>
-                {(Object.keys(FAN_PATHS) as FanPath[]).map((path) => (
-                  <Pressable key={path} onPress={() => setFanPath(path)} style={[styles.pathChip, fanPath === path && styles.pathChipActive]}>
-                    <Text style={[styles.pathChipText, fanPath === path && styles.pathChipTextActive]}>{FAN_PATHS[path].label}</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-              <View style={styles.fanPathCopy}>
-                <Text style={styles.fanPathTitle}>{FAN_PATHS[fanPath].title}</Text>
-                <Text style={styles.fanPathIntro}>{FAN_PATHS[fanPath].intro}</Text>
-              </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.curatedRail}>
-                {FAN_PATHS[fanPath].shows.map(renderCuratedCard)}
-              </ScrollView>
-            </View>
-          ) : null}
-
           <View style={styles.listHeadingRow}>
             <Text style={styles.listHeading}>{tab === 'favorites' ? 'Saved shows' : activeQuery ? `Search results` : 'Browse the archive'}</Text>
             <Text style={styles.resultCount}>{busy ? 'Searching…' : tab === 'favorites' ? `${visibleShows.length} saved` : sourceFilter === 'all' ? `${foundCount.toLocaleString()} recordings` : `${visibleShows.length} loaded`}</Text>
@@ -572,7 +571,7 @@ function RadioApp() {
           <Text style={styles.disclaimer}>Independent fan listening interface. Recordings are served by the Internet Archive; availability and access are controlled by the Archive and collection policies. Not affiliated with or endorsed by the Grateful Dead or Internet Archive.</Text>
         </ScrollView>
 
-        <View style={[styles.playerPanel, { paddingBottom: 12 + insets.bottom }]}>
+        <View style={styles.playerPanel}>
           <View style={styles.playerTop}>
             <View style={styles.playerCopy}>
               <Text style={styles.nowPlayingLabel}>{selectedShow ? 'NOW PLAYING' : 'READY WHEN YOU ARE'}</Text>
@@ -615,9 +614,9 @@ export default function App() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.bg },
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { height: 70, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.line },
-  brandMark: { height: 48, width: 48, borderRadius: 7, borderWidth: 1, borderColor: '#758B6D', backgroundColor: '#010001', overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
-  brandLogo: { height: 46, width: 46 },
+  header: { height: 82, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.line },
+  brandMark: { height: 62, width: 62, borderRadius: 8, borderWidth: 1, borderColor: '#758B6D', backgroundColor: '#010001', overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
+  brandLogo: { height: 60, width: 60 },
   brandCopy: { marginLeft: 11 },
   brand: { color: COLORS.text, fontSize: 13, letterSpacing: 1.4, fontWeight: '700' },
   brandSub: { color: COLORS.muted, fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', marginTop: 3 },
