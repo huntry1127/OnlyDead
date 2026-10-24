@@ -504,7 +504,7 @@ function RadioApp() {
                 </View>
                 <Text style={styles.snapshot}>LATE 2024 SNAPSHOT</Text>
               </View>
-              <Text style={styles.discoveryIntro}>Ranked by recording page views. Cornell appears twice in the Archive’s top ten as two separate recordings.</Text>
+              <Text style={styles.discoveryIntro}>Top nine distinct show dates from the Archive’s late-2024 view snapshot. Cornell appears once, though the Archive counted two recordings of that show.</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.curatedRail}>
                 {ARCHIVE_POPULAR.map(renderCuratedCard)}
               </ScrollView>
