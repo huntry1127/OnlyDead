@@ -18,11 +18,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist node_modules (
-  echo Installing app dependencies. This may take a few minutes the first time.
-  call npm install
-  if errorlevel 1 goto failed
-)
+echo Syncing app dependencies from package-lock.json.
+call npm install
+if errorlevel 1 goto failed
 
 echo Starting OnlyDead for Expo Go. Scan the QR code shown below with Expo Go on Android.
 echo Press Ctrl+C in this window to stop the app.
