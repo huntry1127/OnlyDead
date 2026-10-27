@@ -431,7 +431,7 @@ function RadioApp() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
+      <StatusBar barStyle="light-content" />
       <View style={styles.container}>
         <View style={styles.header}>
           <View style={styles.brandMark}>

@@ -16,17 +16,17 @@ A native iOS and Android listening app for browsing and streaming Grateful Dead 
 
 ## Run on a phone
 
-1. Install Node.js LTS and Expo Go on your iPhone or Android phone.
+1. Install Node.js 22.13 or newer and Expo Go on your iPhone or Android phone.
 2. In this folder, run `npm install` and then `npx expo start`.
 3. Scan the Expo QR code with the Expo Go app (Android) or the iPhone Camera app.
 
 ### Windows quick start
 
-Download or clone the repository, open the project folder that contains `package.json`, and double-click `start-expo-go.bat`. It installs dependencies the first time and starts Expo with a clean Metro cache. Scan the QR code with Expo Go on your Android phone. This flow does not require Android Studio or an Android SDK.
+Download or clone the repository, open the project folder that contains `package.json`, and double-click `start-expo-go.bat`. It syncs dependencies and starts Expo with a clean Metro cache. Scan the QR code with Expo Go on your Android phone. This flow does not require Android Studio or an Android SDK.
 
 If you use the terminal instead, run `npm install` and `npx expo start -c` from that same project folder. Do not use `npx expo run:android` for Expo Go; that command builds a native Android app and requires Android Studio and the Android SDK.
 
-This project targets Expo SDK 57 so it can be tried with the compatible Expo Go release. Expo Go is useful for checking the screens and foreground streaming. Background playback and lock-screen controls need a project-specific native build; the required iOS and Android settings are already configured. A signed install or App Store / Google Play release needs platform builds and store accounts.
+This project targets Expo SDK 58 so it can be tried with the compatible Expo Go release. Expo Go is useful for checking the screens and foreground streaming. Background playback and lock-screen controls need a project-specific native build; the required iOS and Android settings are already configured. A signed install or App Store / Google Play release needs platform builds and store accounts.
 
 ## Build
 
