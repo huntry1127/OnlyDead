@@ -118,7 +118,7 @@ function searchUrl(term: string) {
   const params = new URLSearchParams();
   params.set('q', q);
   ['identifier', 'title', 'date', 'year', 'venue', 'coverage', 'creator', 'source', 'avg_rating', 'num_reviews'].forEach((field) => params.append('fl[]', field));
-  params.set('sort[]', 'date desc');
+  params.append('sort[]', safe ? 'date desc' : 'downloads desc');
   params.set('rows', '30');
   params.set('page', '1');
   params.set('output', 'json');

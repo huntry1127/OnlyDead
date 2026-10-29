@@ -5,6 +5,7 @@ A native iOS and Android listening app for browsing and streaming Grateful Dead 
 ## First version
 
 - Browse recordings from the Internet Archive's `GratefulDead` collection (`mediatype:etree`).
+- Load the default archive list in descending all-time download count; searches stay sorted by show date.
 - Search by year, date, venue, or show title.
 - Filter loaded shows by soundboard, audience, and matrix source; show Archive ratings when available.
 - Save favorite recordings on the device.
