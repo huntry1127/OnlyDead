@@ -24,7 +24,7 @@ if errorlevel 1 goto failed
 
 echo Starting OnlyDead for Expo Go. Scan the QR code shown below with Expo Go on Android.
 echo Press Ctrl+C in this window to stop the app.
-call npx expo start -c
+call npx expo start --go -c
 if errorlevel 1 goto failed
 exit /b 0
 
